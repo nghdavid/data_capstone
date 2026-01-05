@@ -176,8 +176,76 @@
         box-shadow: none;
       }
 
+      .flash {
+        padding: 12px 14px;
+        border-radius: 12px;
+        background: #fff1ef;
+        border: 1px solid #f4c1b9;
+        color: #84261c;
+        font-size: 14px;
+      }
+
       .hidden-field {
         display: none;
+      }
+
+      .deploy-panel {
+        width: min(1100px, 100%);
+        margin: 24px auto 0;
+      }
+
+      .deploy-card {
+        display: grid;
+        gap: 14px;
+      }
+
+      .deploy-grid {
+        display: grid;
+        gap: 12px;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      }
+
+      .deploy-field label {
+        display: block;
+        font-size: 13px;
+        color: var(--muted);
+        margin-bottom: 6px;
+      }
+
+      .deploy-field input {
+        width: 100%;
+        border-radius: 12px;
+        border: 1px solid var(--border);
+        padding: 12px 14px;
+        font-size: 14px;
+        background: #fffaf6;
+        color: #2e1f18;
+      }
+
+      .deploy-actions {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+
+      .helper {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .deploy-success {
+        padding: 12px 14px;
+        border-radius: 12px;
+        background: #eef9f1;
+        border: 1px solid #bfe5ca;
+        color: #1f5e34;
+        font-size: 14px;
+      }
+
+      .deploy-success a {
+        color: inherit;
+        font-weight: 600;
       }
 
       .toast {
@@ -249,6 +317,12 @@
           <textarea class="hidden-field" id="download-html" name="html">{{ html | e }}</textarea>
           <button class="button primary" type="submit">Download HTML</button>
         </form>
+        <form id="vercel-zip-form" action="{{ url_for('download_vercel') }}" method="post">
+          <textarea class="hidden-field" id="vercel-zip-html" name="html">{{ html | e }}</textarea>
+          <button class="button" type="submit" title="Downloads a Vercel-ready zip with deploy instructions.">
+            Deploy to Vercel
+          </button>
+        </form>
         <a class="button" href="{{ url_for('prompt_ui') }}">Back to prompt</a>
         <a class="button" href="{{ url_for('index') }}">Screenshot upload</a>
       </div>
@@ -258,7 +332,7 @@
       <div class="card prompt-card">
         <div class="note">Prompt (edit and update HTML)</div>
         <div class="prompt-fields">
-          <textarea class="prompt-input" name="prompt" required>{{ prompt | e }}</textarea>
+          <textarea class="prompt-input" id="prompt-input" name="prompt" required>{{ prompt | e }}</textarea>
           <button class="cta" type="submit">Update HTML</button>
         </div>
       </div>
@@ -272,6 +346,46 @@
       </div>
     </form>
 
+    <section class="deploy-panel">
+      <div class="card deploy-card">
+        <div class="note">Deploy to Vercel with a personal access token (optional).</div>
+        {% if deployment_error %}
+          <div class="flash">{{ deployment_error }}</div>
+        {% endif %}
+        {% if deployment_url %}
+          <div class="deploy-success">
+            Deployment created. It may take a minute to be ready:
+            <a href="{{ deployment_url }}" target="_blank" rel="noopener">{{ deployment_url }}</a>
+          </div>
+        {% endif %}
+        <form class="deploy-form" action="{{ url_for('deploy_vercel') }}" method="post">
+          <textarea class="hidden-field" id="vercel-api-html" name="html">{{ html | e }}</textarea>
+          <textarea class="hidden-field" id="vercel-prompt" name="prompt">{{ prompt | e }}</textarea>
+          <input type="hidden" name="source" value="prompt" />
+          <div class="deploy-grid">
+            <div class="deploy-field">
+              <label for="vercel-token">Vercel API token (optional)</label>
+              <input
+                id="vercel-token"
+                name="vercel_token"
+                type="password"
+                autocomplete="off"
+                placeholder="Paste token or set VERCEL_TOKEN"
+              />
+            </div>
+            <div class="deploy-field">
+              <label for="vercel-project">Project name (optional)</label>
+              <input id="vercel-project" name="project_name" type="text" placeholder="my-generated-ui" />
+            </div>
+          </div>
+          <div class="deploy-actions">
+            <button class="cta" type="submit">Deploy via API</button>
+            <span class="helper">Token is used once and never stored.</span>
+          </div>
+        </form>
+      </div>
+    </section>
+
     <div class="toast" id="request-toast" role="status" aria-live="polite">
       Request sent. Updating HTML...
     </div>
@@ -283,6 +397,12 @@
       const previewFrame = document.getElementById("html-preview");
       const downloadForm = document.getElementById("download-form");
       const downloadField = document.getElementById("download-html");
+      const vercelZipForm = document.getElementById("vercel-zip-form");
+      const vercelZipField = document.getElementById("vercel-zip-html");
+      const vercelForm = document.querySelector(".deploy-form");
+      const vercelField = document.getElementById("vercel-api-html");
+      const vercelPromptField = document.getElementById("vercel-prompt");
+      const promptInput = document.getElementById("prompt-input");
 
       if (toast && form) {
         const submitButton = form.querySelector("button[type='submit']");
@@ -312,6 +432,21 @@
       if (downloadForm && downloadField && htmlOutput) {
         downloadForm.addEventListener("submit", () => {
           downloadField.value = htmlOutput.value;
+        });
+      }
+
+      if (vercelZipForm && vercelZipField && htmlOutput) {
+        vercelZipForm.addEventListener("submit", () => {
+          vercelZipField.value = htmlOutput.value;
+        });
+      }
+
+      if (vercelForm && vercelField && htmlOutput) {
+        vercelForm.addEventListener("submit", () => {
+          vercelField.value = htmlOutput.value;
+          if (vercelPromptField && promptInput) {
+            vercelPromptField.value = promptInput.value;
+          }
         });
       }
     </script>

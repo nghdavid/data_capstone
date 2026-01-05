@@ -1,5 +1,12 @@
 import base64
+import io
+import json
 import os
+import re
+import urllib.error
+import urllib.request
+import zipfile
+from datetime import datetime, timezone
 
 from flask import Flask, Response, flash, redirect, render_template, request, url_for
 from openai import OpenAI
@@ -57,6 +64,104 @@ def _build_prompt_from_text(user_prompt: str, existing_html: str = "") -> str:
         "Match layout, spacing, colors, and typography as closely as possible. "
         f"User prompt: {user_prompt}"
     )
+
+
+def _build_vercel_readme() -> str:
+    return (
+        "Vercel deployment\n"
+        "1) Unzip this folder.\n"
+        "2) Run: npx vercel\n"
+        "3) For production: npx vercel --prod\n"
+    )
+
+
+def _sanitize_project_name(name: str) -> str:
+    cleaned = re.sub(r"[^a-z0-9-]+", "-", name.strip().lower())
+    cleaned = re.sub(r"-+", "-", cleaned).strip("-")
+    if not cleaned:
+        cleaned = "html-export"
+    if len(cleaned) > 48:
+        cleaned = cleaned[:48].strip("-")
+    return cleaned or "html-export"
+
+
+def _default_project_name() -> str:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    return f"html-export-{stamp}"
+
+
+def _build_project_name(name: str) -> str:
+    return _sanitize_project_name(name) if name else _default_project_name()
+
+
+def _parse_vercel_error(body: str, fallback: str) -> str:
+    try:
+        payload = json.loads(body)
+        if isinstance(payload, dict):
+            if "error" in payload:
+                error = payload["error"]
+                if isinstance(error, dict):
+                    return error.get("message") or error.get("code") or fallback
+                if isinstance(error, str):
+                    return error
+            if "message" in payload and isinstance(payload["message"], str):
+                return payload["message"]
+    except json.JSONDecodeError:
+        pass
+    return fallback
+
+
+def _deploy_to_vercel(html: str, token: str, project_name: str) -> tuple[str, str]:
+    payload = {
+        "name": project_name,
+        "files": [
+            {
+                "file": "index.html",
+                "data": html,
+            }
+        ],
+    }
+    data = json.dumps(payload).encode("utf-8")
+    request = urllib.request.Request(
+        "https://api.vercel.com/v13/deployments?skipAutoDetectionConfirmation=1",
+        data=data,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            response_body = response.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        error_body = exc.read().decode("utf-8", "ignore")
+        error_message = _parse_vercel_error(
+            error_body, f"Vercel API error ({exc.code})."
+        )
+        return "", error_message
+    except urllib.error.URLError as exc:
+        return "", f"Network error contacting Vercel: {exc.reason}"
+    except Exception as exc:
+        return "", f"Unexpected error contacting Vercel: {exc}"
+
+    try:
+        payload = json.loads(response_body)
+    except json.JSONDecodeError:
+        return "", "Vercel API returned an unexpected response."
+
+    url = ""
+    if isinstance(payload, dict):
+        url = payload.get("url") or ""
+        if not url and isinstance(payload.get("alias"), list):
+            url = payload["alias"][0] if payload["alias"] else ""
+
+    if not url:
+        return "", "Vercel API did not return a deployment URL."
+    if not url.startswith(("http://", "https://")):
+        url = f"https://{url}"
+    return url, ""
 
 
 def _generate_html(image_bytes: bytes, mime_type: str) -> str:
@@ -214,6 +319,84 @@ def download():
     response = Response(html, mimetype="text/html")
     response.headers["Content-Disposition"] = "attachment; filename=generated.html"
     return response
+
+
+@app.route("/download-vercel", methods=["POST"])
+def download_vercel():
+    html = request.form.get("html", "").strip()
+    if not html:
+        flash("No HTML available for Vercel export.")
+        return redirect(url_for("index"))
+
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", compression=zipfile.ZIP_DEFLATED) as zip_file:
+        zip_file.writestr("index.html", html)
+        zip_file.writestr("README.txt", _build_vercel_readme())
+
+    zip_buffer.seek(0)
+    response = Response(zip_buffer.read(), mimetype="application/zip")
+    response.headers["Content-Disposition"] = "attachment; filename=vercel-deploy.zip"
+    return response
+
+
+def _render_deploy_result(
+    source: str,
+    html: str,
+    prompt: str = "",
+    deployment_url: str = "",
+    deployment_error: str = "",
+):
+    template = "prompt_result.html" if source == "prompt" else "result.html"
+    return render_template(
+        template,
+        html=html,
+        prompt=prompt,
+        deployment_url=deployment_url,
+        deployment_error=deployment_error,
+    )
+
+
+@app.route("/deploy-vercel", methods=["POST"])
+def deploy_vercel():
+    html = request.form.get("html", "").strip()
+    source = request.form.get("source", "screenshot").strip()
+    prompt = request.form.get("prompt", "").strip()
+
+    if not html:
+        return _render_deploy_result(
+            source,
+            html,
+            prompt,
+            deployment_error="No HTML available for Vercel deploy.",
+        )
+
+    token = request.form.get("vercel_token", "").strip()
+    if not token:
+        token = os.getenv("VERCEL_TOKEN", "").strip()
+    if not token:
+        return _render_deploy_result(
+            source,
+            html,
+            prompt,
+            deployment_error="Provide a Vercel API token or set VERCEL_TOKEN.",
+        )
+
+    project_name = _build_project_name(request.form.get("project_name", "").strip())
+    deployment_url, error_message = _deploy_to_vercel(html, token, project_name)
+    if error_message:
+        return _render_deploy_result(
+            source,
+            html,
+            prompt,
+            deployment_error=error_message,
+        )
+
+    return _render_deploy_result(
+        source,
+        html,
+        prompt,
+        deployment_url=deployment_url,
+    )
 
 
 if __name__ == "__main__":
