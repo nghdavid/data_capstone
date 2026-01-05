@@ -10,13 +10,10 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Create a `.env` file (optional):
+Copy the example env file and fill in your keys (optional):
 
 ```bash
-OPENAI_API_KEY=your_openai_key
-OPENAI_MODEL=gpt-4o-mini
-FLASK_SECRET_KEY=dev
-VERCEL_TOKEN=your_vercel_token
+cp .env_example .env
 ```
 
 ## Run
