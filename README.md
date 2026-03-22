@@ -1,4 +1,4 @@
-# data_capstone
+# ai-ui-generator
 
 AI-powered UI generation app that turns screenshots or text prompts into self-contained HTML/CSS, then optionally packages or deploys the result to Vercel.
 
