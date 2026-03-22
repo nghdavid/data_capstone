@@ -2,6 +2,8 @@
 
 AI-powered UI generation app that turns screenshots or text prompts into self-contained HTML/CSS, then optionally packages or deploys the result to Vercel.
 
+Demo: [YouTube](https://www.youtube.com/watch?v=KWiMDDlBRtI)
+
 ## Overview
 
 This project uses the OpenAI API to generate frontend UI code in two ways:
